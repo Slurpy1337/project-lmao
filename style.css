@@ -1,0 +1,21 @@
+.navbar
+{
+    height: 100px;
+    width: 100%;
+    display: flex;
+    position: fixed;
+    transition: all 2s;
+}
+.changes{
+    height: 50px;
+    transition: all 1s;
+}
+
+
+.headlol
+{
+    margin-top: 5%;
+    width: 1380px;
+    height: 728px;
+    background-image: url("images/slider-1.jpg")
+}
