@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import parse_qs, urlparse, quote
+from urllib.parse import parse_qs, quote, urlparse
 from pathlib import Path
 import html, json, mimetypes, os, threading, time
 
@@ -52,6 +52,68 @@ def human_size(s):
 def file_icon(n):
     e=Path(n).suffix.lower(); m={".png":"🖼️",".jpg":"🖼️",".jpeg":"🖼️",".gif":"🖼️",".webp":"🖼️",".svg":"🖼️",".pdf":"📕",".zip":"🗜️",".rar":"🗜️",".7z":"🗜️",".mp4":"🎬",".mov":"🎬",".mp3":"🎵",".wav":"🎵",".txt":"📄",".md":"📝",".doc":"📘",".docx":"📘",".xls":"📗",".xlsx":"📗"}
     return m.get(e,"📁")
+
+def get_client_name(handler) -> str:
+    params = parse_qs(urlparse(handler.path).query)
+    qname = params.get("user", [""])[0].strip()
+    if qname:
+        return qname[:80]
+    cookie = handler.headers.get("Cookie", "")
+    for part in cookie.split(";"):
+        part = part.strip()
+        if part.startswith("fileapp_user="):
+            return part.split("=", 1)[1][:80]
+    return "anonymous"
+
+
+def log_event(kind: str, user: str, detail: str):
+    with EVENT_LOCK:
+        EVENTS.append({"ts": int(time.time()), "kind": kind, "user": user or "anonymous", "detail": detail})
+        if len(EVENTS) > 250:
+            del EVENTS[:-250]
+
+
+def mark_sent(num_bytes: int):
+    now = time.time()
+    with THROUGHPUT_LOCK:
+        BYTES_WINDOW.append((now, num_bytes))
+        cutoff = now - 5.0
+        while BYTES_WINDOW and BYTES_WINDOW[0][0] < cutoff:
+            BYTES_WINDOW.pop(0)
+
+
+def get_speed_stats():
+    now = time.time()
+    with THROUGHPUT_LOCK:
+        cutoff = now - 5.0
+        while BYTES_WINDOW and BYTES_WINDOW[0][0] < cutoff:
+            BYTES_WINDOW.pop(0)
+        total = sum(v for _, v in BYTES_WINDOW)
+    bps = total / 5.0
+    utilization = min(100.0, (bps / REFERENCE_BPS) * 100.0)
+    return bps, utilization
+
+
+def human_size(n: float) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+    v = float(n)
+    for u in units:
+        if v < 1024 or u == units[-1]:
+            return f"{int(v)} {u}" if u == "B" else f"{v:.1f} {u}"
+        v /= 1024.0
+
+
+def file_icon(name: str) -> str:
+    ext = Path(name).suffix.lower()
+    mapping = {
+        ".png": "🖼️", ".jpg": "🖼️", ".jpeg": "🖼️", ".gif": "🖼️", ".webp": "🖼️", ".svg": "🖼️",
+        ".pdf": "📕", ".zip": "🗜️", ".rar": "🗜️", ".7z": "🗜️", ".tar": "🗜️", ".gz": "🗜️",
+        ".mp4": "🎬", ".mov": "🎬", ".mkv": "🎬", ".mp3": "🎵", ".wav": "🎵",
+        ".txt": "📄", ".md": "📝", ".doc": "📘", ".docx": "📘", ".xls": "📗", ".xlsx": "📗",
+        ".py": "🐍", ".js": "🟨", ".json": "🧩",
+    }
+    return mapping.get(ext, "📁")
+
 
 class FileAppHandler(BaseHTTPRequestHandler):
     server_version="LocalFileApp/1.0"
